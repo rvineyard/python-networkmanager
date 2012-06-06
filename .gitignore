@@ -1,5 +1,4 @@
 build
-debian
 dist
 docs/_build
 .*.sw?
