@@ -1,8 +1,11 @@
 #!/usr/bin/python
-"""
-n-m is a command-line tool to deal with network-manager. It can connect you to
-defined networks and disconnect you again.
-"""
+#
+# Command-line tool to interact with NetworkManager. With this tool, you can
+# inspect various configuration items and (de-)activate connections.
+#
+# (C) 2011-2013 Dennis Kaarsemaker
+# License: GPL3+
+
 from __future__ import print_function
 
 usage = """%prog [options] action [arguments]
@@ -24,6 +27,8 @@ import socket
 import struct
 import sys
 
+PY3 = sys.version_info[0] >= 3
+
 def main():
     p = optparse.OptionParser(usage=usage)
     opts, args = p.parse_args()
@@ -37,6 +42,9 @@ def main():
 
     elif args[0] == 'offline':
         offline()
+
+    elif args[0] == 'visible':
+        visible()
 
     elif len(args) < 2:
         p.print_help()
@@ -108,7 +116,7 @@ def activate(names):
                 'gsm': NetworkManager.NM_DEVICE_TYPE_MODEM,
             }.get(ctype,ctype)
             devices = NetworkManager.NetworkManager.GetDevices()
-            
+
             for dev in devices:
                 if dev.DeviceType == dtype and dev.State == NetworkManager.NM_DEVICE_STATE_DISCONNECTED:
                     break
@@ -157,28 +165,34 @@ def info(names):
     connections = dict([(x['connection']['id'], x) for x in connections])
 
     for n in names:
+        if not PY3:
+            n = n.decode('utf-8')
         if n not in connections:
             print("No such connection: %s" % n, file=sys.stderr)
+            return
 
         line = "Info about '%s'" % n
         print(line + "\n" + '=' * len(line))
         conn = connections[n]
         print("Type:", conn['connection']['type'])
         print("Connect automatically:", ["No","Yes"][conn['connection'].get('autoconnect', True)])
-        print("Last connected on:", str(datetime.datetime.fromtimestamp(conn['connection']['timestamp'])))
+        if 'timestamp' in conn['connection']:
+            print("Last connected on:", str(datetime.datetime.fromtimestamp(conn['connection']['timestamp'])))
+        else:
+            print("Never connected")
         print("IPv4 settings (%s)" % conn['ipv4']['method'])
-        print("  Address(es):", auto(ipv4s(conn['ipv4']['addresses'])))
-        print("  DNS servers:", auto(ipv4s(conn['ipv4']['dns'])))
-        print("  Routes:", auto(routes(conn['ipv4']['routes'])))
+        print("  Address(es):", ', '.join([x[0] for x in conn['ipv4']['addresses']]) or '(Automatic)')
+        print("  DNS servers:",  ', '.join(conn['ipv4']['dns']) or '(Automatic)')
+        print("  Routes:", ", ".join(["%s/%d -> %s" % x[:3] for x in conn['ipv4']['routes']]))
         print("  Can be default route:", ["Yes","No"][conn['ipv4'].get('never-default', False)])
 
         if conn['connection']['type'] == '802-3-ethernet':
             print("Physical link")
-            print("  MAC address:", mac(conn['802-3-ethernet'].get('mac-address')))
+            print("  MAC address:", conn['802-3-ethernet'].get('mac-address', '(Automatic)'))
         elif conn['connection']['type'] == '802-11-wireless':
             print("Wireless link")
-            print("  MAC address:", mac(conn['802-11-wireless'].get('mac-address')))
-            print("  SSID:", ssid(conn['802-11-wireless']['ssid']))
+            print("  MAC address:", conn['802-11-wireless'].get('mac-address', '(Automatic)'))
+            print("  SSID:", conn['802-11-wireless']['ssid'])
             print("  Wireless security:", conn[conn['802-11-wireless']['security']]['key-mgmt'])
         elif conn['connection']['type'] == 'vpn':
             print("VPN")
@@ -186,33 +200,32 @@ def info(names):
             print("  Remote:", conn['vpn']['data']['remote'])
 
 def dump(names):
-    connections = [x.GetSettings() for x in NetworkManager.Settings.ListConnections()]
-    connections = dict([(x['connection']['id'], x) for x in connections])
+    from pprint import pprint
+    connections = {}
+    for conn in NetworkManager.Settings.ListConnections():
+        settings = conn.GetSettings()
+        secrets = conn.GetSecrets()
+        for key in secrets:
+            settings[key].update(secrets[key])
+        connections[settings['connection']['id']] = settings
 
     for n in names:
         if n not in connections:
             print("No such connection: %s" % n, file=sys.stderr)
 
-        from pprint import pprint
         pprint(connections[n])
 
-def auto(seq):
-    return "(Automatic)" if not seq else ", ".join(seq)
-
-def ipv4(ip):
-    return socket.inet_ntoa(struct.pack('L',ip))
-
-def ipv4s(seq):
-    return [ipv4(x) for x in seq]
-
-def routes(seq):
-    return ["%s/%d -> %s" % (ipv4(x[0]), x[1], ipv4(x[2])) for x in seq]
-
-def mac(seq):
-    return "(Automatic)" if not seq else "%X:%X:%X:%X:%X:%X" % tuple(seq)
-
-def ssid(seq):
-    return "".join([chr(x) for x in seq])
+def visible():
+    for device in NetworkManager.NetworkManager.GetDevices():
+        if device.DeviceType != NetworkManager.NM_DEVICE_TYPE_WIFI:
+            continue
+        print("Visible on %s" % device.Udi[device.Udi.rfind('/')+1:])
+        device = device.SpecificDevice()
+        active = device.ActiveAccessPoint
+        aps = device.GetAccessPoints()
+        for ap in aps:
+            prefix = '* ' if ap.object_path == active.object_path else '  '
+            print("%s %s" % (prefix, ap.Ssid))
 
 if __name__ == '__main__':
     main()
