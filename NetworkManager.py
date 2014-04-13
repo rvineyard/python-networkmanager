@@ -140,9 +140,9 @@ class NetworkManager(NMDbusInterface):
             settings = args[0]
             for key in settings:
                 if 'mac-address' in settings[key]:
-                    settings[key]['mac-address'] = fixup.mac_to_dbus(settings['key']['mac-address'])
+                    settings[key]['mac-address'] = fixups.mac_to_dbus(settings[key]['mac-address'])
                 if 'bssid' in settings[key]:
-                    settings[key]['bssid'] = fixup.mac_to_dbus(settings['key']['mac-address'])
+                    settings[key]['bssid'] = fixups.mac_to_dbus(settings[key]['mac-address'])
             if 'ssid' in settings.get('802-11-wireless', {}):
                 settings['802-11-wireless']['ssid'] = fixups.ssid_to_dbus(settings['802-11-wireless']['ssid'])
             if 'ipv4' in settings:
@@ -212,6 +212,11 @@ class Device(NMDbusInterface):
             NM_DEVICE_TYPE_VLAN: Vlan,
             NM_DEVICE_TYPE_ADSL: Adsl,
         }[self.DeviceType](self.object_path)
+
+    def postprocess(self, name, val):
+        if name == 'Ip4Address':
+            return fixups.addr_to_python(val)
+        return val
 
 class AccessPoint(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.AccessPoint'
@@ -342,7 +347,7 @@ class fixups(object):
         addr, netmask, gateway = addrconf
         return [
             fixups.addr_to_dbus(addr),
-            netmask,
+            fixups.mask_to_dbus(netmask),
             fixups.addr_to_dbus(gateway)
         ]
 
@@ -352,7 +357,11 @@ class fixups(object):
 
     @staticmethod
     def addr_to_dbus(addr):
-        return struct.unpack('I', socket.inet_aton(addr))
+        return dbus.UInt32(struct.unpack('I', socket.inet_aton(addr))[0])
+
+    @staticmethod
+    def mask_to_dbus(mask):
+        return dbus.UInt32(mask)
 
     @staticmethod
     def route_to_python(route):
@@ -369,7 +378,7 @@ class fixups(object):
         addr, netmask, gateway, metric = route
         return [
             fixups.addr_to_dbus(addr),
-            netmask,
+            fixups.mask_to_dbus(netmask),
             fixups.addr_to_dbus(gateway),
             socket.htonl(metric)
         ]
@@ -396,6 +405,7 @@ NM_DEVICE_TYPE_INFINIBAND = 9
 NM_DEVICE_TYPE_BOND = 10
 NM_DEVICE_TYPE_VLAN = 11
 NM_DEVICE_TYPE_ADSL = 12
+NM_DEVICE_TYPE_BRIDGE = 13
 NM_DEVICE_CAP_NONE = 0
 NM_DEVICE_CAP_NM_SUPPORTED = 1
 NM_DEVICE_CAP_CARRIER_DETECT = 2
@@ -407,7 +417,8 @@ NM_WIFI_DEVICE_CAP_CIPHER_CCMP = 8
 NM_WIFI_DEVICE_CAP_WPA = 16
 NM_WIFI_DEVICE_CAP_RSN = 32
 NM_WIFI_DEVICE_CAP_AP = 64
-NM_WIFI_DEVICE_CAP_IBSS_RSN = 128
+NM_WIFI_DEVICE_CAP_ADHOC = 128
+NM_WIFI_DEVICE_CAP_IBSS_RSN = 256
 NM_802_11_AP_FLAGS_NONE = 0
 NM_802_11_AP_FLAGS_PRIVACY = 1
 NM_802_11_AP_SEC_NONE = 0
@@ -424,6 +435,7 @@ NM_802_11_AP_SEC_KEY_MGMT_802_1X = 512
 NM_802_11_MODE_UNKNOWN = 0
 NM_802_11_MODE_ADHOC = 1
 NM_802_11_MODE_INFRA = 2
+NM_802_11_MODE_AP = 3
 NM_BT_CAPABILITY_NONE = 0
 NM_BT_CAPABILITY_DUN = 1
 NM_BT_CAPABILITY_NAP = 2
@@ -432,6 +444,7 @@ NM_DEVICE_MODEM_CAPABILITY_POTS = 1
 NM_DEVICE_MODEM_CAPABILITY_CDMA_EVDO = 2
 NM_DEVICE_MODEM_CAPABILITY_GSM_UMTS = 4
 NM_DEVICE_MODEM_CAPABILITY_LTE = 8
+NM_DEVICE_MODEM_CAPABILITY_OFONO = 16
 NM_DEVICE_STATE_UNKNOWN = 0
 NM_DEVICE_STATE_UNMANAGED = 10
 NM_DEVICE_STATE_UNAVAILABLE = 20
@@ -497,11 +510,15 @@ NM_DEVICE_STATE_REASON_GSM_SIM_WRONG = 48
 NM_DEVICE_STATE_REASON_INFINIBAND_MODE = 49
 NM_DEVICE_STATE_REASON_DEPENDENCY_FAILED = 50
 NM_DEVICE_STATE_REASON_BR2684_FAILED = 51
+NM_DEVICE_STATE_REASON_MODEM_MANAGER_UNAVAILABLE = 52
+NM_DEVICE_STATE_REASON_SSID_NOT_FOUND = 53
+NM_DEVICE_STATE_REASON_SECONDARY_CONNECTION_FAILED = 54
 NM_DEVICE_STATE_REASON_LAST = 65535
 NM_ACTIVE_CONNECTION_STATE_UNKNOWN = 0
 NM_ACTIVE_CONNECTION_STATE_ACTIVATING = 1
 NM_ACTIVE_CONNECTION_STATE_ACTIVATED = 2
 NM_ACTIVE_CONNECTION_STATE_DEACTIVATING = 3
+NM_ACTIVE_CONNECTION_STATE_DEACTIVATED = 4
 NM_VPN_SERVICE_STATE_UNKNOWN = 0
 NM_VPN_SERVICE_STATE_INIT = 1
 NM_VPN_SERVICE_STATE_SHUTDOWN = 2
