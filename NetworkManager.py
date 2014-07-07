@@ -50,15 +50,15 @@ class NMDbusInterface(object):
                 setattr(self.__class__, p, self._make_property(p))
 
     def _make_property(self, name):
-        def get(self):
+        def get_func(self):
             data = self.proxy.Get(self.interface_name, name, dbus_interface='org.freedesktop.DBus.Properties')
             debug("Received property %s.%s" % (self.interface_name, name), data)
             return self.postprocess(name, self.unwrap(data))
-        def set(self, value):
-            data = self.wrap(self.preprocess(name, data))
+        def set_func(self, value):
+            value = self.wrap(self.preprocess(name, (value,), {})[0][0])
             debug("Setting property %s.%s" % (self.interface_name, name), value)
             return self.proxy.Set(self.interface_name, name, value, dbus_interface='org.freedesktop.DBus.Properties')
-        return property(get, set)
+        return property(get_func, set_func)
 
     def unwrap(self, val):
         if isinstance(val, dbus.ByteArray):
@@ -211,6 +211,7 @@ class Device(NMDbusInterface):
             NM_DEVICE_TYPE_BOND: Bond,
             NM_DEVICE_TYPE_VLAN: Vlan,
             NM_DEVICE_TYPE_ADSL: Adsl,
+            NM_DEVICE_TYPE_BRIDGE: Bridge,
         }[self.DeviceType](self.object_path)
 
     def postprocess(self, name, val):
@@ -392,6 +393,11 @@ NM_STATE_CONNECTING = 40
 NM_STATE_CONNECTED_LOCAL = 50
 NM_STATE_CONNECTED_SITE = 60
 NM_STATE_CONNECTED_GLOBAL = 70
+NM_CONNECTIVITY_UNKNOWN = 0
+NM_CONNECTIVITY_NONE = 1
+NM_CONNECTIVITY_PORTAL = 2
+NM_CONNECTIVITY_LIMITED = 3
+NM_CONNECTIVITY_FULL = 4
 NM_DEVICE_TYPE_UNKNOWN = 0
 NM_DEVICE_TYPE_ETHERNET = 1
 NM_DEVICE_TYPE_WIFI = 2
@@ -549,3 +555,9 @@ NM_VPN_CONNECTION_STATE_REASON_CONNECTION_REMOVED = 11
 NM_VPN_PLUGIN_FAILURE_LOGIN_FAILED = 0
 NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED = 1
 NM_VPN_PLUGIN_FAILURE_BAD_IP_CONFIG = 2
+NM_SECRET_AGENT_ERROR_NOT_AUTHORIZED = 0
+NM_SECRET_AGENT_ERROR_INVALID_CONNECTION = 1
+NM_SECRET_AGENT_ERROR_USER_CANCELED = 2
+NM_SECRET_AGENT_ERROR_AGENT_CANCELED = 3
+NM_SECRET_AGENT_ERROR_INTERNAL_ERROR = 4
+NM_SECRET_AGENT_ERROR_NO_SECRETS = 5
