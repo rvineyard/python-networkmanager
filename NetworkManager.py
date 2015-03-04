@@ -1,7 +1,7 @@
 # NetworkManager - a library to make interacting with the NetworkManager daemon
 # easier.
 #
-# (C)2011-2013 Dennis Kaarsemaker
+# (C)2011-2015 Dennis Kaarsemaker
 # License: GPL3+
 
 import dbus
@@ -141,6 +141,8 @@ class NetworkManager(NMDbusInterface):
             for key in settings:
                 if 'mac-address' in settings[key]:
                     settings[key]['mac-address'] = fixups.mac_to_dbus(settings[key]['mac-address'])
+                if 'cloned-mac-address' in settings[key]:
+                    settings[key]['cloned-mac-address'] = fixups.mac_to_dbus(settings[key]['cloned-mac-address'])
                 if 'bssid' in settings[key]:
                     settings[key]['bssid'] = fixups.mac_to_dbus(settings[key]['mac-address'])
             if 'ssid' in settings.get('802-11-wireless', {}):
@@ -184,6 +186,8 @@ class Connection(NMDbusInterface):
                 val_ = val[key]
                 if 'mac-address' in val_:
                     val_['mac-address'] = fixups.mac_to_python(val_['mac-address'])
+                if 'cloned-mac-address' in val_:
+                    val_['cloned-mac-address'] = fixups.mac_to_python(val_['cloned-mac-address'])
                 if 'bssid' in val_:
                     val_['bssid'] = fixups.mac_to_python(val_['bssid'])
             if 'ipv4' in val:
@@ -225,6 +229,8 @@ class AccessPoint(NMDbusInterface):
     def postprocess(self, name, val):
         if name == 'Ssid':
             return fixups.ssid_to_python(val)
+        elif name == 'Strength':
+            return fixups.strength_to_python(val)
         return val
 
 class Wired(NMDbusInterface):
@@ -327,6 +333,10 @@ class fixups(object):
         return [dbus.Byte(x) for x in ssid]
 
     @staticmethod
+    def strength_to_python(strength):
+        return struct.unpack('B', strength)[0]
+
+    @staticmethod
     def mac_to_python(mac):
         return "%02X:%02X:%02X:%02X:%02X:%02X" % tuple([ord(x) for x in mac])
 
@@ -412,9 +422,12 @@ NM_DEVICE_TYPE_BOND = 10
 NM_DEVICE_TYPE_VLAN = 11
 NM_DEVICE_TYPE_ADSL = 12
 NM_DEVICE_TYPE_BRIDGE = 13
+NM_DEVICE_TYPE_GENERIC = 14
+NM_DEVICE_TYPE_TEAM = 15
 NM_DEVICE_CAP_NONE = 0
 NM_DEVICE_CAP_NM_SUPPORTED = 1
 NM_DEVICE_CAP_CARRIER_DETECT = 2
+NM_DEVICE_CAP_IS_SOFTWARE = 4
 NM_WIFI_DEVICE_CAP_NONE = 0
 NM_WIFI_DEVICE_CAP_CIPHER_WEP40 = 1
 NM_WIFI_DEVICE_CAP_CIPHER_WEP104 = 2
@@ -519,6 +532,11 @@ NM_DEVICE_STATE_REASON_BR2684_FAILED = 51
 NM_DEVICE_STATE_REASON_MODEM_MANAGER_UNAVAILABLE = 52
 NM_DEVICE_STATE_REASON_SSID_NOT_FOUND = 53
 NM_DEVICE_STATE_REASON_SECONDARY_CONNECTION_FAILED = 54
+NM_DEVICE_STATE_REASON_DCB_FCOE_FAILED = 55
+NM_DEVICE_STATE_REASON_TEAMD_CONTROL_FAILED = 56
+NM_DEVICE_STATE_REASON_MODEM_FAILED = 57
+NM_DEVICE_STATE_REASON_MODEM_AVAILABLE = 58
+NM_DEVICE_STATE_REASON_SIM_PIN_INCORRECT = 59
 NM_DEVICE_STATE_REASON_LAST = 65535
 NM_ACTIVE_CONNECTION_STATE_UNKNOWN = 0
 NM_ACTIVE_CONNECTION_STATE_ACTIVATING = 1
