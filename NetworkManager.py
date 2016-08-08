@@ -4,11 +4,13 @@
 # (C)2011-2016 Dennis Kaarsemaker
 # License: zlib
 
+import copy
 import dbus
 import os
 import socket
 import struct
 import sys
+import weakref
 
 PY3 = sys.version_info >= (3,0)
 if PY3:
@@ -25,17 +27,21 @@ try:
 except:
     debug = lambda *args: None
 
+auto_reconnect = True
+registry = []
+
 class NMDbusInterface(object):
     bus = dbus.SystemBus()
     dbus_service = 'org.freedesktop.NetworkManager'
     object_path = None
 
     def __init__(self, object_path=None):
+        global registry
         if isinstance(object_path, NMDbusInterface):
             object_path = object_path.object_path
         self.object_path = self.object_path or object_path
-        self.proxy = self.bus.get_object(self.dbus_service, self.object_path)
-        self.interface = dbus.Interface(self.proxy, self.interface_name)
+        self.signals = []
+        self.connect()
 
         properties = []
         try:
@@ -48,6 +54,25 @@ class NMDbusInterface(object):
             p = str(p)
             if not hasattr(self.__class__, p):
                 setattr(self.__class__, p, self._make_property(p))
+
+        registry.append(weakref.proxy(self))
+
+    def connect(self):
+        self.proxy = self.bus.get_object(self.dbus_service, self.object_path)
+        self.interface = dbus.Interface(self.proxy, self.interface_name)
+        signals = self.signals[:]
+        self.signals = []
+        for signal, handler, args, kwargs in signals:
+            self.connect_to_signal(signal, handler, *args, **kwargs)
+
+    def reconnect(self, name, old, new):
+        if str(new) == "" or str(name) != 'org.freedesktop.NetworkManager':
+            return
+        for obj in registry:
+            try:
+                obj.connect()
+            except ReferenceError:
+                pass
 
     def _make_property(self, name):
         def get_func(self):
@@ -88,9 +113,9 @@ class NMDbusInterface(object):
     def wrap(self, val):
         if isinstance(val, NMDbusInterface):
             return val.object_path
-        if hasattr(val, 'mro'):
-            for klass in val.mro():
-                if klass.__module__ == '_dbus_bindings':
+        if hasattr(val.__class__, 'mro'):
+            for klass in val.__class__.mro():
+                if klass.__module__ in ('dbus', '_dbus_bindings'):
                     return val
         if hasattr(val, '__iter__') and not isinstance(val, basestring):
             if hasattr(val, 'items'):
@@ -120,6 +145,7 @@ class NMDbusInterface(object):
         return proxy_call
 
     def connect_to_signal(self, signal, handler, *args, **kwargs):
+        self.signals.append((signal, handler, args, kwargs))
         def helper(*args, **kwargs):
             args = [self.unwrap(x) for x in args]
             handler(*args, **kwargs)
@@ -137,9 +163,14 @@ class NetworkManager(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager'
     object_path = '/org/freedesktop/NetworkManager'
 
+    def auto_reconnect(self):
+        global auto_reconnect
+        auto_reconnect = True
+        self.bus.add_signal_receiver(self.reconnect, 'NameOwnerChanged', 'org.freedesktop.DBus')
+
     def preprocess(self, name, args, kwargs):
-        if name in ('AddConnection', 'Update', 'AddAndActivateConnection'):
-            settings = args[0]
+        if name in ('AddConnection', 'Update', 'UpdateUnsaved', 'AddAndActivateConnection'):
+            settings = copy.deepcopy(args[0])
             for key in settings:
                 if 'mac-address' in settings[key]:
                     settings[key]['mac-address'] = fixups.mac_to_dbus(settings[key]['mac-address'])
@@ -163,6 +194,18 @@ class NetworkManager(NMDbusInterface):
                     settings['ipv6']['routes'] = [fixups.route_to_dbus(route,socket.AF_INET6) for route in settings['ipv6']['routes']]
                 if 'dns' in settings['ipv6']:
                     settings['ipv6']['dns'] = [fixups.addr_to_dbus(addr,socket.AF_INET6) for addr in settings['ipv6']['dns']]
+            # Get rid of empty arrays/dicts. dbus barfs on them (can't guess
+            # signatures), and if they were to get through, NetworkManager
+            # ignores them anyway.
+            for key in list(settings.keys()):
+                if isinstance(settings[key], dict):
+                    for key2 in list(settings[key].keys()):
+                        if settings[key][key2] in ({}, []):
+                            del settings[key][key2]
+                if settings[key] in ({}, []):
+                    del settings[key]
+            return (settings,) + args[1:], kwargs
+
         return args, kwargs
 NetworkManager = NetworkManager()
 
@@ -221,18 +264,24 @@ class Device(NMDbusInterface):
 
     def SpecificDevice(self):
         return {
-            NM_DEVICE_TYPE_ETHERNET: Wired,
-            NM_DEVICE_TYPE_WIFI: Wireless,
-            NM_DEVICE_TYPE_MODEM: Modem,
-            NM_DEVICE_TYPE_BT: Bluetooth,
-            NM_DEVICE_TYPE_OLPC_MESH: OlpcMesh,
-            NM_DEVICE_TYPE_WIMAX: Wimax,
-            NM_DEVICE_TYPE_INFINIBAND: Infiniband,
-            NM_DEVICE_TYPE_BOND: Bond,
-            NM_DEVICE_TYPE_VLAN: Vlan,
             NM_DEVICE_TYPE_ADSL: Adsl,
+            NM_DEVICE_TYPE_BOND: Bond,
             NM_DEVICE_TYPE_BRIDGE: Bridge,
-            NM_DEVICE_TYPE_GENERIC: Generic
+            NM_DEVICE_TYPE_BT: Bluetooth,
+            NM_DEVICE_TYPE_ETHERNET: Wired,
+            NM_DEVICE_TYPE_GENERIC: Generic,
+            NM_DEVICE_TYPE_INFINIBAND: Infiniband,
+            NM_DEVICE_TYPE_IP_TUNNEL: IPTunnel,
+            NM_DEVICE_TYPE_MACVLAN: Macvlan,
+            NM_DEVICE_TYPE_MODEM: Modem,
+            NM_DEVICE_TYPE_OLPC_MESH: OlpcMesh,
+            NM_DEVICE_TYPE_TEAM: Team,
+            NM_DEVICE_TYPE_TUN: Tun,
+            NM_DEVICE_TYPE_VETH: Veth,
+            NM_DEVICE_TYPE_VLAN: Vlan,
+            NM_DEVICE_TYPE_VXLAN: Vxlan,
+            NM_DEVICE_TYPE_WIFI: Wireless,
+            NM_DEVICE_TYPE_WIMAX: Wimax,
         }[self.DeviceType](self.object_path)
 
     def postprocess(self, name, val):
@@ -252,26 +301,11 @@ class AccessPoint(NMDbusInterface):
             return fixups.strength_to_python(val)
         return val
 
-class Wired(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.Wired'
-
-class Wireless(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.Wireless'
-
-class Modem(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.Modem'
+class Adsl(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.adsl'
 
 class Bluetooth(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.Device.Bluetooth'
-
-class OlpcMesh(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.OlpcMesh'
-
-class Wimax(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.Wimax'
-
-class Infiniband(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.Infiniband'
 
 class Bond(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.Device.Bond'
@@ -279,14 +313,47 @@ class Bond(NMDbusInterface):
 class Bridge(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.Device.Bridge'
 
+class Generic(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Generic'
+
+class Infiniband(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Infiniband'
+
+class IPTunnel(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Infiniband'
+
+class Macvlan(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Generic'
+
+class Modem(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Modem'
+
+class OlpcMesh(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.OlpcMesh'
+
+class Team(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Generic'
+
+class Tun(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Generic'
+
+class Veth(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Generic'
+
 class Vlan(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.Device.Vlan'
 
-class Adsl(NMDbusInterface):
-    interface_name = 'org.freedesktop.NetworkManager.Device.adsl'
-
-class Generic(NMDbusInterface):
+class Vxlan(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.Device.Generic'
+
+class Wimax(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Wimax'
+
+class Wired(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Wired'
+
+class Wireless(NMDbusInterface):
+    interface_name = 'org.freedesktop.NetworkManager.Device.Wireless'
 
 class NSP(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.Wimax.NSP'
@@ -335,7 +402,7 @@ class VPNConnection(NMDbusInterface):
         conf['addresses'] = [fixups.addrconf_to_python(addr,socket.AF_INET) for addr in conf['addresses']]
         conf['routes'] = [fixups.route_to_python(route,socket.AF_INET) for route in conf['routes']]
         conf['dns'] = [fixups.addr_to_python(addr,socket.AF_INET) for addr in conf['dns']]
-        return args, kwargs
+        return (conf,) + args[1:], kwargs
 
 class VPNPlugin(NMDbusInterface):
     interface_name = 'org.freedesktop.NetworkManager.VPN.Plugin'
@@ -470,6 +537,11 @@ NM_DEVICE_TYPE_ADSL = 12
 NM_DEVICE_TYPE_BRIDGE = 13
 NM_DEVICE_TYPE_GENERIC = 14
 NM_DEVICE_TYPE_TEAM = 15
+NM_DEVICE_TYPE_TUN = 16
+NM_DEVICE_TYPE_IP_TUNNEL = 17
+NM_DEVICE_TYPE_MACVLAN = 18
+NM_DEVICE_TYPE_VXLAN = 19
+NM_DEVICE_TYPE_VETH = 20
 NM_DEVICE_CAP_NONE = 0
 NM_DEVICE_CAP_NM_SUPPORTED = 1
 NM_DEVICE_CAP_CARRIER_DETECT = 2
@@ -486,6 +558,7 @@ NM_WIFI_DEVICE_CAP_ADHOC = 128
 NM_WIFI_DEVICE_CAP_FREQ_VALID = 256
 NM_WIFI_DEVICE_CAP_FREQ_2GHZ = 512
 NM_WIFI_DEVICE_CAP_FREQ_5GHZ = 1024
+NM_WIFI_DEVICE_CAP_IBSS_RSN = 2048
 NM_802_11_AP_FLAGS_NONE = 0
 NM_802_11_AP_FLAGS_PRIVACY = 1
 NM_802_11_AP_SEC_NONE = 0
