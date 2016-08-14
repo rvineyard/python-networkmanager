@@ -174,6 +174,8 @@ class NetworkManager(NMDbusInterface):
             for key in settings:
                 if 'mac-address' in settings[key]:
                     settings[key]['mac-address'] = fixups.mac_to_dbus(settings[key]['mac-address'])
+                if 'mac-address-blacklist' in settings[key]:
+                    settings[key]['mac-address-blacklist'] = [fixups.mac_to_dbus(mac) for mac in settings[key]['mac-address-blacklist']]
                 if 'cloned-mac-address' in settings[key]:
                     settings[key]['cloned-mac-address'] = fixups.mac_to_dbus(settings[key]['cloned-mac-address'])
                 if 'bssid' in settings[key]:
@@ -241,6 +243,8 @@ class Connection(NMDbusInterface):
                 val_ = val[key]
                 if 'mac-address' in val_:
                     val_['mac-address'] = fixups.mac_to_python(val_['mac-address'])
+                if 'mac-address-blacklist' in val_:
+                    val_['mac-address-blacklist'] = [fixups.mac_to_python(mac) for mac in val_['mac-address-blacklist']]
                 if 'cloned-mac-address' in val_:
                     val_['cloned-mac-address'] = fixups.mac_to_python(val_['cloned-mac-address'])
                 if 'bssid' in val_:
